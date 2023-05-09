@@ -4,7 +4,7 @@ from BMesh import BMesh
 from collections import defaultdict
 import numpy as np
 
-target_names = ['Face', 'Face.001', 'Face.002', 'head', 'Lumine.001']
+target_names = ['Face', 'Face.True', 'Face.Pred', 'head.true', 'head.pred']
 
 blendshape_keys = {}
 
