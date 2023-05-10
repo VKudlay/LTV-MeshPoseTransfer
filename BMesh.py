@@ -216,21 +216,22 @@ class SpectralMesh(BMeshObject):
     #         del self._added_edges
     #     self.update_object()
 
-
 class ColorizableMesh(BMeshObject):
+    
     def __init__(self, obj=None, mesh=None):
         super().__init__(obj=obj, mesh=mesh)
+
 
     @staticmethod
     def scale01(arr): 
         return (arr - arr.min(axis=0)) / (arr.max(axis=0) - arr.min(axis=0))
 
-    def color_vertices(self, diff, scale=False):
-        # Colors the vertices of the mesh based on the difference array `diff`
+    def color_vertices(self, diff, scale=False, layer_name='Col'):
         vert_colors = self.obj.data.vertex_colors
-        while(vert_colors):
-            vert_colors.remove(self.obj.data.vertex_colors[0])
-        color_layer = vert_colors.new()
+        color_layer = vert_colors.get(layer_name)
+        if not color_layer:
+            color_layer = vert_colors.new(name=layer_name)
+
         colors = diff if not scale else ColorizableMesh.scale01(diff)
         
         ## Loop over the vertices and assign colors based on the difference array
