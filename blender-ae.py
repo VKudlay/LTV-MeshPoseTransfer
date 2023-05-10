@@ -4,6 +4,9 @@
 ##  Make the program non-blocking (i.e. let the optimization run while still allowing blender interactions)
 ##  Incorporate visualization into training callback to visualize training progressively on multiple expressions.
 ##  Consider other modifications (VAE, special training, etc.)
+import pip
+#pip.main("install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu117".split())
+#pip.main("install numpy scipy tqdm".split())
 
 import torch
 import bpy
@@ -61,17 +64,17 @@ with (
 
     use_diff = True ## Train to predict per-vertex position or per-vertex displacement from basis
     load_pretrained = False
-    batch_size=64
+    batch_size = 256
     if use_diff: ## Settings that seem to work for me
-        MeshXAE = MeshUNet # MeshAE
+        MeshXAE = MeshVUNet # MeshAE
         k_dims = 1024       ## Graph Laplacian eigenvector count
-        bneck = 256         ## Bottleneck dimension
+        bneck = 512         ## Bottleneck dimension
         vs=[256, 64, 32, 16, 8]    ## "Latent Vertex" dimension progression
         fs=[8, 16, 32, 64, 256]    ## Feature dimension progression
         epochs = 10000
-        lr = 2e-3
+        lr = 1e-3
         act_fn = torch.nn.Tanh
-        sched_decay = 0.5   ## Scheduler settings
+        sched_decay = 0.2   ## Scheduler settings
         sched_patience = 500
         sched_thresh = 1e-3
         ae_kwargs = {
@@ -79,7 +82,10 @@ with (
             'num_decoders' : 2,
 #            'skip_idx' : [1, 2, 3]
         }
-        arches = [(0,0), (0,1)]
+        arches = [
+            (0,0), 
+            (0,1)
+        ]
 #    else:  ## Paper Settings: Very slow to converge (or does it even? idk)
 #        MeshXAE = MeshUVAE # MeshAE
 #        k_dims = 2048       ## Graph Laplacian eigenvector count
@@ -127,8 +133,8 @@ with (
         preprocess_data(obj1k, valid_keys, fwd1, True),
         preprocess_data(obj2t, valid_keys, fwd2, True), valid_keys)
     udata = BlendshapeDataset(
-        preprocess_data(obj1k, t2_keys, fwd1, True),
-        preprocess_data(obj3k, t2_keys, fwd3, True), t2_keys)
+        preprocess_data(obj1k, t2_keys, fwd1, False),
+        preprocess_data(obj3k, t2_keys, fwd3, False), t2_keys)
     # ndata1 = BlendshapeDataset(
     #     preprocess_data(objn, ['Basis'], fwdn, True),
     #     preprocess_data(obj2t, ['Basis'], fwd2, True), ['Basis'])
@@ -203,13 +209,13 @@ with (
         pred_diffs_ob3 = []
         for key, data in zip(all_keys, aloader):
             outputs = tdata.denorm(model(data[0].to(device)), 'y')
-            pred_diffs_all += [inv2(outputs.cpu().numpy())]
+            pred_diffs_all += [inv2(outputs)]
         for key, data in zip(kno_keys, kloader):
             outputs = tdata.denorm(model(data[0].to(device)), 'y')
-            pred_diffs_kno += [inv2(outputs.cpu().numpy())]
+            pred_diffs_kno += [inv2(outputs)]
         for key, data in zip(t2_keys, uloader):
             outputs = udata.denorm(model(data[0].to(device), dec=1), 'y')
-            pred_diffs_ob3 += [inv3(outputs.cpu().numpy())]
+            pred_diffs_ob3 += [inv3(outputs)]
         pred_diffs_all = np.concatenate(pred_diffs_all, axis=0)
         pred_diffs_kno = np.concatenate(pred_diffs_kno, axis=0)
         pred_diffs_ob3 = np.concatenate(pred_diffs_ob3, axis=0)

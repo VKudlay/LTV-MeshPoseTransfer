@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import pytorch_lightning as pl
 from torch.utils.data import Dataset, ConcatDataset
 from torchvision.transforms import ToTensor
 import numpy as np
@@ -9,6 +8,11 @@ from functools import partial
 from tqdm import tqdm
 
 np.set_printoptions(precision=3)
+
+def to_numpy(tensor):
+    td = tensor.detach()
+    try:    return td.cpu().numpy()
+    except: return td.numpy()
 
 class Trainer():
 
@@ -37,13 +41,13 @@ class Trainer():
                 tlosses = []
                 for b, data in enumerate(d):
                     tloss, tmetric = self.train_step(data, arch=a)
-                    tlosses += [tloss.detach().numpy().mean()]
+                    tlosses += [to_numpy(tloss).mean()]
                 stats[f'loss{i+1}'] += [np.mean(tlosses)]
 
             vlosses  = []
             for b, data in enumerate(D1): 
                 vloss, vmetric = self.valid_step(data)
-                vlosses += [vloss.detach().numpy().mean()]
+                vlosses += [to_numpy(vloss).mean()]
             stats['vloss'] += [np.mean(vlosses)]
 
             trial_stat = {k : np.mean(v[-100:]) for k,v in stats.items()}
@@ -80,7 +84,7 @@ class Trainer():
 
 
 class SConvBlock(nn.Module):
-    def __init__(self, vs, fs, vstride=1, conv_fn=nn.Conv1d, act_fn=nn.LeakyReLU, padding='valid', bn=False, drop=0):
+    def __init__(self, vs, fs, vstride=2, conv_fn=nn.Conv1d, act_fn=nn.LeakyReLU, padding='valid', bn=False, drop=0):
         super().__init__()
         self.conv = conv_fn(fs[0], fs[1], kernel_size=(vstride), stride=(vstride), padding=padding) 
         self.down = nn.Linear(vs[0]//vstride, vs[1])
@@ -100,7 +104,7 @@ class SConvBlock(nn.Module):
         return x
     
 class TConvBlock(SConvBlock):
-    def __init__(self, vs, fs, vstride=1, conv_fn=nn.ConvTranspose1d, act_fn=nn.LeakyReLU, padding=0, bn=False):
+    def __init__(self, vs, fs, vstride=2, conv_fn=nn.ConvTranspose1d, act_fn=nn.LeakyReLU, padding=0, bn=False):
         super().__init__(vs, fs, vstride, conv_fn, act_fn, padding)
         self.down = nn.Linear(vs[0]*vstride, vs[1])
 
@@ -143,7 +147,7 @@ class Permute(nn.Module):
 
 ##########################################################################################
 
-class MeshAE(pl.LightningModule):
+class MeshAE(nn.Module):
     def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1):
         super().__init__()
         self.nv1 = nv1
@@ -185,6 +189,7 @@ class MeshAE(pl.LightningModule):
     def compile(self, loss=torch.nn.MSELoss(), metrics=[], device=torch.device("cpu")):
         self.loss = loss
         self.metrics = metrics
+        self.device = device
         self.to(device)
         
     def forward(self, inputs, enc=0, dec=0):
@@ -352,7 +357,7 @@ class MeshDataset(Dataset):
 
     def denorm(self, tensor, output_type='y'):
         mean, std = (self.y_mean, self.y_std) if (output_type == 'y') else (self.x_mean, self.x_std)
-        return tensor * std + mean
+        return to_numpy(tensor) * std + mean
 
 class BlendshapeDataset(MeshDataset):
     def __init__(self, obj1_data, obj2_data, keys, sample=True):
