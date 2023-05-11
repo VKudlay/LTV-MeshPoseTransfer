@@ -49,7 +49,6 @@ def update_blend_shape(self, context):
     for keyref in ckeyrefs:
         keyref.value = blendshape_value
         
-
 def get_shape_keys(self, context):
     shape_keys = []
     true_count = defaultdict(lambda: 0)
@@ -68,38 +67,51 @@ def get_shape_keys(self, context):
     tc, pc = true_count, pred_count
     return [(key, f"{key} ({tc[key]}T/{pc[key]}P)", "") for key in shape_keys if (tc[key] + pc[key]) > 1]
 
-# handler_references = []
-# def toggle_vertex_colors(self, context):
-#     global handler_references
-#     if self.show_vertex_colors:
-#         if len(handler_references) == 0:
-#             for objname, obj in objgen():
-#                 if len(obj.data.vertex_colors):
-#                     handler_reference += [bpy.types.SpaceView3D.draw_handler_add(BMesh(obj).display_vertex_colors, (bpy.context,), 'WINDOW', 'POST_PIXEL')]
-#     else:
-#         for ref in handler_references:
-#             bpy.types.SpaceView3D.draw_handler_remove(handler_reference, 'WINDOW')
+##########
 
+class SelectDeformedOperator(bpy.types.Operator):
+    bl_idname = "object.select_deformed"
+    bl_label = "Select Deformed Vertices"
 
-# import gpu
-# from gpu_extras.batch import batch_for_shader
+    @classmethod
+    def poll(cls, context):
+        return context.mode == 'OBJECT' and context.object is not None
 
-# def draw_vertex_colors(obj, context):
-#     mesh = obj.data
-#     if not mesh.vertex_colors: return
-#     color_layer = mesh.vertex_colors.active.data
+    def execute(self, context):
+        obj = context.object
+        if obj.type != 'MESH' or obj.data.shape_keys is None:
+            self.report({'WARNING'}, "Active object is not a mesh or has no shape keys")
+            return {'CANCELLED'}
 
-#     # https://docs.blender.org/api/current/gpu.html
-#     vertices = np.empty((len(mesh.vertices), 3), 'f')
-#     indices = np.empty((len(mesh.loop_triangles), 3), 'i')
-#     mesh.vertices.foreach_get("co", np.reshape(vertices, len(mesh.vertices) * 3))
-#     mesh.loop_triangles.foreach_get("vertices", np.reshape(indices, len(mesh.loop_triangles) * 3))
-#     colors = np.array([color_layer[v.index].color for v in mesh.vertices])
+        sk = obj.data.shape_keys
+        kb = sk.key_blocks.get(context.scene.blendshape_key)
+        if kb is None:
+            self.report({'WARNING'}, "No shape key found with the specified name")
+            return {'CANCELLED'}
 
-#     shader = gpu.shader.from_builtin('3D_SMOOTH_COLOR')
-#     batch = batch_for_shader(shader, 'TRIS', {"pos": vertices, "color": colors}, indices=indices)
-#     shader.bind()
-#     batch.draw(shader)
+        threshold = context.scene.deform_threshold
+
+        # Switch to edit mode to be able to select vertices
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        # Deselect all vertices
+        bpy.ops.mesh.select_all(action='DESELECT')
+
+        # Switch back to object mode to be able to access vertices data
+        bpy.ops.object.mode_set(mode='OBJECT')
+
+        # Select vertices that have been deformed by the shape key
+        for i, vertex in enumerate(obj.data.vertices):
+            deform = kb.data[i].co - vertex.co
+            if deform.length > threshold:
+                vertex.select = True
+
+        # Switch back to edit mode to show the selection
+        bpy.ops.object.mode_set(mode='EDIT')
+
+        return {'FINISHED'}
+
+##########
 
 class BlendShapePanel(bpy.types.Panel):
     bl_label = "Blend Shape Control"
@@ -117,12 +129,13 @@ class BlendShapePanel(bpy.types.Panel):
         scene = context.scene
         layout.prop(scene, "blendshape_key", text="Shape Key")
         layout.prop(scene, "blendshape_value", slider=True)
-        # layout.prop(scene, "show_vertex_colors", text="Toggle Vertex Colors")
+        layout.prop(scene, "deform_threshold", text="Deformation Threshold")
+        layout.operator("object.select_deformed", text="Select Deformed Vertices")
 
-draw_handlers = []
-def register():
+def register(obj_names):
     # Pre-compute the shape keys and store their references
-    global blendshape_keys, draw_handlers
+    global blendshape_keys, target_names
+    target_names = obj_names
     blendshape_keys = {}
     bpy.utils.register_class(BlendShapePanel)
     bpy.types.Scene.blendshape_value = FloatProperty(
@@ -136,20 +149,22 @@ def register():
         description="Select the blend shape key to control",
         items=get_shape_keys,
     )
-    # bpy.types.Scene.show_vertex_colors = BoolProperty(name="Show Vertex Colors", default=True, update=toggle_vertex_colors)
+    bpy.types.Scene.deform_threshold = FloatProperty(
+        name="Deformation Threshold",
+        description="Vertices with deformation above this threshold will be selected",
+        min=0, max=1, default=0.1,
+    )
     for objname, obj in objgen():
         if obj.data.shape_keys:
             blendshape_keys[objname] = {key.name: key for key in obj.data.shape_keys.key_blocks}
-    # draw_handlers += [bpy.types.SpaceView3D.draw_handler_add(draw_vertex_colors, (bpy.context.object, bpy.context), 'WINDOW', 'POST_VIEW')]
+    bpy.utils.register_class(SelectDeformedOperator)
 
 def unregister():
     global handlers
     bpy.utils.unregister_class(BlendShapePanel)
+    bpy.utils.unregister_class(SelectDeformedOperator)
     del bpy.types.Scene.blendshape_value
     del bpy.types.Scene.blendshape_key
-    # del bpy.types.Scene.show_vertex_colors
-    # for handler in draw_handlers:
-        # bpy.types.SpaceView3D.draw_handler_remove(handler, 'WINDOW')
 
 def rename_shape_keys(obj_name, rename_dict=[], substring_dict={"_L":"Left", "_R":"Right"}):
     # # Example usage

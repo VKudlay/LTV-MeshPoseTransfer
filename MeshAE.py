@@ -37,7 +37,6 @@ class Trainer():
         stats = defaultdict(lambda: [])
         pbar = tqdm(range(1, epochs+1))
         for epoch in pbar:
-            # metrics = []
             D = D0 if isinstance(D0, (tuple, list)) else [D0]
             for i, (d, a) in enumerate(zip(D, arches)):
                 tlosses = []
@@ -86,29 +85,30 @@ class Trainer():
 
 
 class SConvBlock(nn.Module):
-    def __init__(self, vs, fs, vstride=2, conv_fn=nn.Conv1d, act_fn=nn.LeakyReLU, padding='valid', bn=False, drop=0):
+    def __init__(self, vs, fs, vstride=3, conv_fn=nn.Conv1d, act_fn=nn.LeakyReLU, padding=1, bnorm=False, drop=0):
         super().__init__()
-        self.conv = conv_fn(fs[0], fs[1], kernel_size=(vstride), stride=(vstride), padding=padding) 
-        self.down = nn.Linear(vs[0]//vstride, vs[1])
+        self.conv = conv_fn(fs[0], fs[1], kernel_size=(vstride), stride=(1), padding=padding) 
+        self.down = nn.Linear(vs[0], vs[1])
         self.act  = act_fn()
-        # self.drop = nn.Dropout(drop)
-        self.bn   = nn.BatchNorm1d(fs[1]) if bn else lambda x: x
+        self.drop = nn.Dropout(drop) if drop else nn.Identity()
+        self.bn   = nn.BatchNorm1d(fs[1]) if bnorm else nn.Identity()
          
     def forward(self, inputs):
         # print(inputs.shape, '->', self.conv, '->')
         x = self.conv(inputs)
+        # x = self.act(x)
         # print(x.shape, '->', self.down, '->')
         x = self.down(x)
         # print(x.shape)
         x = self.act(x)
-        # x = self.drop(x)
+        x = self.drop(x)
         x = self.bn(x)
         return x
     
 class TConvBlock(SConvBlock):
-    def __init__(self, vs, fs, vstride=2, conv_fn=nn.ConvTranspose1d, act_fn=nn.LeakyReLU, padding=0, bn=False):
+    def __init__(self, vs, fs, vstride=3, conv_fn=nn.ConvTranspose1d, act_fn=nn.LeakyReLU, padding=1, bnorm=False, drop=0):
         super().__init__(vs, fs, vstride, conv_fn, act_fn, padding)
-        self.down = nn.Linear(vs[0]*vstride, vs[1])
+        self.down = nn.Linear(vs[0], vs[1])
 
 # class TConvBlock(SConvBlock):
 #     def __init__(self, vs, fs, vstride=4, conv_fn=nn.ConvTranspose1d, act_fn=nn.LeakyReLU, padding=0, bn=False):
@@ -150,42 +150,35 @@ class Permute(nn.Module):
 ##########################################################################################
 
 class MeshAE(nn.Module):
-    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1):
+    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1, bnorm=True, dropout=0, split_idx=-2):
         super().__init__()
         self.nv1 = nv1
         self.nv2 = nv2
         self.v_seq = vs
         self.f_seq = fs
-        idx = 3
-        self.encoder = [self.build_encoder(bneck, [nv1] + vs, [3] + fs, act_fn) for _ in range(num_encoders)]
-        self.decoder1 = self.build_decoder1(bneck, vs[::-1][:idx], fs[::-1][:idx], act_fn)
-        self.decoder2 = [self.build_decoder2(bneck, vs[::-1][idx-1:] + [nv2], fs[::-1][idx-1:] + [3], act_fn) 
-                         for _ in range(num_decoders)]
+        self.bnorm = bnorm
+        self.dropout = dropout
+        idx = split_idx
+        self.encoder = [self.build_encoder(bneck, [nv1] + vs, [3] + fs, act_fn, bnorm=bnorm, drop=dropout) for _ in range(num_encoders)]
+        self.decoder1 = self.build_decoder1(bneck, vs[::-1][:idx], fs[::-1][:idx], act_fn, bnorm=bnorm, drop=dropout)
+        self.decoder2 = [self.build_decoder2(bneck, vs[::-1][idx-1:] + [nv2], fs[::-1][idx-1:] + [3], act_fn, bnorm=bnorm, drop=dropout) for _ in range(num_decoders)]
         self.decoder = [nn.Sequential(self.decoder1, decoder2) for decoder2 in self.decoder2]
-
         for i,c in enumerate(self.encoder): setattr(self, f"encoder{i+1}", c)
         for i,c in enumerate(self.decoder): setattr(self, f"decoder{i+1}", c)
 
-    def build_encoder(self, bneck, vs, fs, act_fn):
-        cblocks = [SConvBlock((v1,v2), (f1,f2), act_fn=act_fn) 
-            for v1,v2,f1,f2 in zip(vs[:-1], vs[1:], fs[:-1], fs[1:])]
-        return nn.Sequential(
-            Permute(1, 0),
-            *cblocks, 
-            nn.Flatten(),
-            nn.Linear(vs[-1] * fs[-1], bneck))
+    def build_encoder(self, bneck, vs, fs, act_fn, bnorm, drop):
+        cblocks = [SConvBlock((v1,v2), (f1,f2), act_fn=act_fn, bnorm=bnorm, drop=drop) 
+                   for v1,v2,f1,f2 in zip(vs[:-1], vs[1:], fs[:-1], fs[1:])]
+        return nn.Sequential(Permute(1, 0), *cblocks, nn.Flatten(), nn.Linear(vs[-1] * fs[-1], bneck))
 
-    def build_decoder1(self, bneck, vs, fs, act_fn):
-        tblocks = [TConvBlock((v1,v2), (f1,f2), act_fn=act_fn, bn=True
-            ) for i, (v1,v2,f1,f2) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:]))]
-        return nn.Sequential(
-            nn.Linear(bneck, vs[0] * fs[0]),
-            Reshape(fs[0], vs[0]),
-            *tblocks)
+    def build_decoder1(self, bneck, vs, fs, act_fn, bnorm, drop):
+        tblocks = [TConvBlock((v1,v2), (f1,f2), act_fn=act_fn, bnorm=bnorm, drop=drop) 
+                   for i, (v1,v2,f1,f2) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:]))]
+        return nn.Sequential(nn.Linear(bneck, vs[0] * fs[0]), Reshape(fs[0], vs[0]), *tblocks)
 
-    def build_decoder2(self, bneck, vs, fs, act_fn):
-        tblocks = [TConvBlock((v1,v2), (f1,f2), act_fn=(act_fn, nn.Identity)[end], bn=not end
-            ) for i, (v1,v2,f1,f2,end) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [0] * len(fs[2:]) + [1]))]
+    def build_decoder2(self, bneck, vs, fs, act_fn, bnorm, drop):
+        tblocks = [TConvBlock((v1,v2), (f1,f2), act_fn=(act_fn, nn.Identity)[end], bnorm=(bnorm and not end), drop=(drop and not end)) 
+                   for i, (v1,v2,f1,f2,end) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [0] * len(fs[2:]) + [1]))]
         return nn.Sequential(*tblocks, Permute(1, 0))
 
     def compile(self, loss=torch.nn.MSELoss(), metrics=[], device=torch.device("cpu")):
@@ -208,8 +201,8 @@ class MeshAE(nn.Module):
 
 
 class MeshVAE(MeshAE):
-    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1):
-        super().__init__(nv1, nv2, bneck, vs, fs, act_fn=act_fn, num_encoders=num_encoders, num_decoders=num_decoders)
+    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1, bnorm=True, dropout=0, split_idx=-2):
+        super().__init__(nv1, nv2, bneck, vs, fs, act_fn=act_fn, num_encoders=num_encoders, num_decoders=num_decoders, bnorm=bnorm, dropout=dropout, split_idx=split_idx)
         self.fc_mu = nn.Linear(bneck, bneck)
         self.fc_logvar = nn.Linear(bneck, bneck)
 
@@ -246,23 +239,22 @@ class MeshVAE(MeshAE):
 
 class MeshUNet(MeshAE):
 
-    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1, skip_idx=[1], dropout=0.0):
-        self.skip_idx = skip_idx
-        super().__init__(nv1, nv2, bneck, vs, fs, act_fn=act_fn, num_encoders=num_encoders, num_decoders=num_decoders)
+    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1, bnorm=True, dropout=0, split_idx=-2):
+        super().__init__(nv1, nv2, bneck, vs, fs, act_fn=act_fn, num_encoders=num_encoders, num_decoders=num_decoders, bnorm=bnorm, dropout=dropout, split_idx=split_idx)
         self.drop = nn.Dropout(dropout)
         self.acts = [lambda x: x]  #[torch.sin, torch.cos, torch.tanh] # 
     
-    def build_decoder1(self, bneck, vs, fs, act_fn):
-        tblocks = [TConvBlock((v1,v2), (f1*m,f2), act_fn=act_fn, bn=True
-            ) for i, (v1,v2,f1,f2,m) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [1] + [2] * len(fs[2:])))]
+    def build_decoder1(self, bneck, vs, fs, act_fn, bnorm, drop):
+        tblocks = [TConvBlock((v1,v2), (f1*m,f2), act_fn=act_fn, bnorm=bnorm, drop=drop) 
+            for i, (v1,v2,f1,f2,m) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [1] + [2] * len(fs[2:])))]
         return nn.Sequential(
             nn.Linear(bneck, vs[0] * fs[0]),
             Reshape(fs[0], vs[0]),
             *tblocks)
 
-    def build_decoder2(self, bneck, vs, fs, act_fn):
-        tblocks = [TConvBlock((v1,v2), (f1*2,f2), act_fn=(act_fn, nn.Identity)[end], bn=not end
-            ) for i, (v1,v2,f1,f2,end) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [0] * len(fs[2:]) + [1]))]
+    def build_decoder2(self, bneck, vs, fs, act_fn, bnorm, drop):
+        tblocks = [TConvBlock((v1,v2), (f1*2,f2), act_fn=(act_fn, nn.Identity)[end], bnorm=(bnorm and not end), drop=(drop and not end)) 
+            for i, (v1,v2,f1,f2,end) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [0] * len(fs[2:]) + [1]))]
         return nn.Sequential(*tblocks, Permute(1, 0))
 
     def forward(self, inputs, enc=0, dec=0):
@@ -272,12 +264,11 @@ class MeshUNet(MeshAE):
             x = layer(x)
             if isinstance(layer, SConvBlock):
                 skips += [self.drop(x)]
-
         i = 0
         for decoder in self.decoder[dec]:
             for layer in decoder:
                 if isinstance(layer, TConvBlock):
-                    if i > 0:
+                    if 0 < i < len(skips):
                         act = self.acts[i % len(self.acts)]
                         skip = act(skips[-i-1])
                         x = torch.cat((x, skip), dim=1)
@@ -288,23 +279,22 @@ class MeshUNet(MeshAE):
 
 class MeshVUNet(MeshVAE):
 
-    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1, skip_idx=[1], dropout=0.0):
-        self.skip_idx = skip_idx
-        super().__init__(nv1, nv2, bneck, vs, fs, act_fn=act_fn, num_encoders=num_encoders, num_decoders=num_decoders)
+    def __init__(self, nv1, nv2, bneck, vs=[256, 64, 16], fs=[16, 64, 256], act_fn=nn.LeakyReLU, num_encoders=1, num_decoders=1, bnorm=True, dropout=0, split_idx=-2):
+        super().__init__(nv1, nv2, bneck, vs, fs, act_fn=act_fn, num_encoders=num_encoders, num_decoders=num_decoders, bnorm=bnorm, dropout=dropout, split_idx=split_idx)
         self.drop = nn.Dropout(dropout)
         self.acts = [lambda x: x]  #[torch.sin, torch.cos, torch.tanh] # 
     
-    def build_decoder1(self, bneck, vs, fs, act_fn):
-        tblocks = [TConvBlock((v1,v2), (f1*m,f2), act_fn=act_fn, bn=True
-            ) for i, (v1,v2,f1,f2,m) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [1] + [2] * len(fs[2:])))]
+    def build_decoder1(self, bneck, vs, fs, act_fn, bnorm, drop):
+        tblocks = [TConvBlock((v1,v2), (f1*m,f2), act_fn=act_fn, bnorm=bnorm, drop=drop) 
+            for i, (v1,v2,f1,f2,m) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [1] + [2] * len(fs[2:])))]
         return nn.Sequential(
             nn.Linear(bneck, vs[0] * fs[0]),
             Reshape(fs[0], vs[0]),
             *tblocks)
 
-    def build_decoder2(self, bneck, vs, fs, act_fn):
-        tblocks = [TConvBlock((v1,v2), (f1*2,f2), act_fn=(act_fn, nn.Identity)[end], bn=not end
-            ) for i, (v1,v2,f1,f2,end) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [0] * len(fs[2:]) + [1]))]
+    def build_decoder2(self, bneck, vs, fs, act_fn, bnorm, drop):
+        tblocks = [TConvBlock((v1,v2), (f1*2,f2), act_fn=(act_fn, nn.Identity)[end], bnorm=(bnorm and not end), drop=(drop and not end)) 
+            for i, (v1,v2,f1,f2,end) in enumerate(zip(vs[:-1], vs[1:], fs[:-1], fs[1:], [0] * len(fs[2:]) + [1]))]
         return nn.Sequential(*tblocks, Permute(1, 0))
 
     def forward(self, inputs, enc=0, dec=0, get_latents=False):
@@ -322,7 +312,7 @@ class MeshVUNet(MeshVAE):
         for decoder in self.decoder[dec]:
             for layer in decoder:
                 if isinstance(layer, TConvBlock):
-                    if i > 0:
+                    if 0 < i < len(skips):
                         act = self.acts[i % len(self.acts)]
                         skip = act(skips[-i-1])
                         x = torch.cat((x, skip), dim=1)
@@ -387,13 +377,13 @@ class BlendshapeDataset(MeshDataset):
     def __getitem__(self, idx):
         zero_side = self.sample and np.random.uniform(0,1) < 0.5
         sample_bs = self.sample and np.random.uniform(0,1) < 0.5
-        rotate_bs = np.random.uniform(0,1) < 0.3
         if zero_side:   x, y = self.get_zeroed_xy(np.random.uniform(0,1) < 0.5)
         else:           x, y = self.x, self.y
         if sample_bs:   x, y = self._get_linear_combination(x, y)       
         else:           x, y = [torch.tensor(v[idx]) for v in (x, y)]
-        scale = torch.tensor(np.random.uniform(0.75, 1.25))
+        scale = torch.tensor(np.random.uniform(0.7, 1.3))
         x, y = [v * scale for v in (x, y)]
+        rotate_bs = np.random.uniform(0,1) < 0.3
         if rotate_bs:
             rot = torch.tensor(Rotation.random().as_matrix())
             x, y = [v @ rot for v in (x, y)]
