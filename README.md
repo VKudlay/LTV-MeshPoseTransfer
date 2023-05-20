@@ -3,6 +3,11 @@ Trying to transfer shapekeys from one mesh to another mesh without necessary ver
 
 **Other side of the project:** Will link to it when they compile it.  
 
+### Contributors: 
+- Vadim Kudlay
+- Troy Conklin
+- Luca Fonstad
+
 ----
 
 ## Presentation Slides: 
