@@ -1,4 +1,4 @@
-## Summary
+## Blendshape Transfer - Spectral DL Side
 Trying to transfer shapekeys from one mesh to another mesh without necessary vertex alignment. This is the deep learning side of the project using spectral-domain conversion. 
 
 **Other side of the project:** Will link to it when they compile it.  
