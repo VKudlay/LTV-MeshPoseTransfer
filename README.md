@@ -1,8 +1,7 @@
-### TL;DR (Or, I guess, quick summary)
+## Summary
 Trying to transfer shapekeys from one mesh to another mesh without necessary vertex alignment. This is the deep learning side of the project using spectral-domain conversion. 
 
-### Other side of the project.
-- Will link to it when they compile it.  
+**Other side of the project:** Will link to it when they compile it.  
 
 ### Presentation Slides: 
 - https://docs.google.com/presentation/d/1_PDcN-u-dA_nowIVteLG_1u8tL9WCKV9_CpH4GFptUs/edit?usp=sharing
