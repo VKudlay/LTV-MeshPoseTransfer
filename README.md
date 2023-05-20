@@ -23,6 +23,6 @@ Trying to transfer shapekeys from one mesh to another mesh without necessary ver
   - This is where we got the starter ARKit + Fcl model to transfer from
 - [GitHub - kugelrund/mesh_segmentation: A python addon for mesh segmentation in blender using spectral clustering methods](https://github.com/kugelrund/mesh_segmentation)
   - Starter code for segmentation routine (had to build upon it to support blender incorporation and vertex-based graph stuff)
-- On my end, I used ChatGPT as a productivity tool. 
-  - Was especially helpful for blender-related boilerplate and refactoring.
-  - Wasn't very helpful for model tuning and math debugging.
+- On my end, I used ChatGPT as a productivity tool. Overall boosted productivity but didn't intrude on the spirit of the assignment. 
+  - Was especially helpful for blender-related boilerplate and minor/overall refactoring.
+  - Wasn't very helpful (yet) for model tuning and math/theory debugging. Also required a lot of debugging in general. 
