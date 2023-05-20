@@ -4,9 +4,9 @@ Trying to transfer shapekeys from one mesh to another mesh without necessary ver
 **Other side of the project:** [Pose-Transfer](https://github.com/lucafons/Pose-Transfer)
 
 ### Contributors: 
-- Vadim Kudlay
-- Troy Conklin
-- Luca Fonstad
+- **Vadim Kudlay:** Spectral model stuff, blender wrapper for meshes, face data procurement, respective slides/presentation parts.
+- **Troy Conklin:** Mesh patching, trimesh visualization, mesh encoder, decoder vertex position solver, and projection in LRI coordinates.
+- **Luca Fonstad:** Decoder matrix reconstruction, animation, rendering, dataset collection and visualization
 
 ----
 
